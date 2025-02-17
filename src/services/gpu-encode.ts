@@ -1,6 +1,9 @@
 import { exec } from "child_process";
 import { readdirSync, statSync, mkdirSync, existsSync } from "fs";
 import { join, parse } from "path";
+import { promisify } from "util";
+
+const execPromise = promisify(exec);
 
 const INPUT_DIR = "input";
 const OUTPUT_DIR = "output";
@@ -19,41 +22,28 @@ const courseDirs = readdirSync(INPUT_DIR).filter((item) => {
   return statSync(fullPath).isDirectory();
 });
 
-// Process each course directory
-courseDirs.forEach((courseDir) => {
-  const coursePath = join(INPUT_DIR, courseDir);
-  const courseOutputPath = join(OUTPUT_DIR, courseDir);
+// Function to process a single video file
+async function processVideo(
+  coursePath: string,
+  courseOutputPath: string,
+  inputFile: string,
+): Promise<void> {
+  const { name: fileName } = parse(inputFile);
 
-  // Create output directory for the course if it doesn't exist
-  if (!existsSync(courseOutputPath)) {
-    mkdirSync(courseOutputPath, { recursive: true });
-  }
+  // Create stream directories if they don't exist
+  OUTPUTS.forEach((output) => {
+    const streamDir = join(courseOutputPath, fileName, `stream_${output}`);
+    if (!existsSync(streamDir)) {
+      mkdirSync(streamDir, { recursive: true });
+    }
+  });
 
-  // Get all MP4 files from the course directory
-  const mp4Files = readdirSync(coursePath).filter((file) =>
-    file.toLowerCase().endsWith(".mp4"),
-  );
-
-  mp4Files.forEach((inputFile) => {
-    const { name: fileName } = parse(inputFile);
-
-    RESOLUTIONS.forEach((res, index) => {
-      const bitrate = BITRATES[index];
-      const outputName = OUTPUTS[index];
-      // Create stream directories if they don't exist
-      OUTPUTS.forEach((output) => {
-        const streamDir = join(courseOutputPath, fileName, `stream_${output}`);
-        if (!existsSync(streamDir)) {
-          mkdirSync(streamDir, { recursive: true });
-        }
-      });
-
-      const filterComplex = `[0:v]split=3[v1][v2][v3]; \
+  const filterComplex = `[0:v]split=3[v1][v2][v3]; \
 [v1]scale=w=1920:h=1080[v1out]; \
 [v2]scale=w=1280:h=720[v2out]; \
 [v3]scale=w=854:h=480[v3out]`;
 
-      const command = `
+  const command = `
     ffmpeg -i "${join(coursePath, inputFile)}" \
     -filter_complex "${filterComplex}" \
     -map "[v1out]" -c:v:0 h264_nvenc -preset fast -b:v:0 ${BITRATES[0]} -maxrate:v:0 ${MAXRATES[0]} -bufsize:v:0 ${BUFSIZES[0]} \
@@ -73,13 +63,77 @@ courseDirs.forEach((courseDir) => {
     "${courseOutputPath}/${fileName}/stream_%v/playlist.m3u8"
   `;
 
-      exec(command, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Error encoding ${outputName}: ${error}`);
-          return;
-        }
-        console.log(`Encoded ${outputName}: ${stdout}`);
+  try {
+    const { stdout } = await execPromise(command);
+    console.log(`Encoded ${fileName}: ${stdout}`);
+  } catch (error) {
+    console.error(`Error encoding ${fileName}:`, error);
+    throw error;
+  }
+}
+
+// Process videos in batches
+async function processBatch(
+  videos: { coursePath: string; courseOutputPath: string; inputFile: string }[],
+  batchSize: number,
+) {
+  for (let i = 0; i < videos.length; i += batchSize) {
+    const batch = videos.slice(i, i + batchSize);
+    console.log(
+      `Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(videos.length / batchSize)}`,
+    );
+
+    try {
+      await Promise.all(
+        batch.map(({ coursePath, courseOutputPath, inputFile }) =>
+          processVideo(coursePath, courseOutputPath, inputFile),
+        ),
+      );
+    } catch (error) {
+      console.error("Error processing batch:", error);
+    }
+  }
+}
+
+// Main execution
+async function main() {
+  const allVideos: {
+    coursePath: string;
+    courseOutputPath: string;
+    inputFile: string;
+  }[] = [];
+
+  // Collect all videos that need to be processed
+  courseDirs.forEach((courseDir) => {
+    const coursePath = join(INPUT_DIR, courseDir);
+    const courseOutputPath = join(OUTPUT_DIR, courseDir);
+
+    // Create output directory for the course if it doesn't exist
+    if (!existsSync(courseOutputPath)) {
+      mkdirSync(courseOutputPath, { recursive: true });
+    }
+
+    // Get all MP4 files from the course directory
+    const mp4Files = readdirSync(coursePath).filter((file) =>
+      file.toLowerCase().endsWith(".mp4"),
+    );
+
+    mp4Files.forEach((inputFile) => {
+      allVideos.push({
+        coursePath,
+        courseOutputPath,
+        inputFile,
       });
     });
   });
+
+  // Process videos in batches of 3
+  await processBatch(allVideos, 3);
+  console.log("All videos processed successfully!");
+}
+
+// Run the main function
+main().catch((error) => {
+  console.error("Error in main execution:", error);
+  process.exit(1);
 });
