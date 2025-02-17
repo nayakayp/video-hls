@@ -54,7 +54,7 @@ courseDirs.forEach((courseDir) => {
 [v3]scale=w=854:h=480[v3out]`;
 
       const command = `
-    ffmpeg -y -hwaccel cuda -hwaccel_output_format cuda -i "${join(coursePath, inputFile)}" \
+    ffmpeg -i "${join(coursePath, inputFile)}" \
     -filter_complex "${filterComplex}" \
     -map "[v1out]" -c:v:0 h264_nvenc -preset fast -b:v:0 ${BITRATES[0]} -maxrate:v:0 ${MAXRATES[0]} -bufsize:v:0 ${BUFSIZES[0]} \
     -map "[v2out]" -c:v:1 h264_nvenc -preset fast -b:v:1 ${BITRATES[1]} -maxrate:v:1 ${MAXRATES[1]} -bufsize:v:1 ${BUFSIZES[1]} \
