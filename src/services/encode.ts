@@ -47,8 +47,8 @@ courseDirs.forEach((courseDir) => {
         outputName === "2160p" ? "5.1" : outputName === "1080p" ? "4.2" : "3.1";
 
       const command = `
-    ffmpeg -y -i "${join(coursePath, inputFile)}" \
-    -c:v libx264 -preset veryfast -profile:v ${profile} -level:v ${level} -b:v ${bitrate} -s ${res} \
+    ffmpeg -y -hwaccel cuda -hwaccel_output_format cuda -i "${join(coursePath, inputFile)}" \
+    -c:v h264_nvenc -preset p4 -profile:v ${profile} -level:v ${level} -b:v ${bitrate} -s ${res} \
     -c:a aac -b:a 128k -ac 2 \
     -g ${GOP_SIZE} -keyint_min ${GOP_SIZE} -sc_threshold 0 \
     -force_key_frames "expr:gte(t,n_forced*4)" \
